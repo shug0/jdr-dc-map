@@ -1,3 +1,4 @@
+import { inject } from "@vercel/analytics";
 import { initPdfViewer, type InitialView, type PdfViewer } from "./pdf-viewer";
 import { renderMarkers } from "./overlay";
 import { initPointsDialog } from "./points-dialog";
@@ -46,6 +47,8 @@ function refreshUI(viewState?: ViewState): void {
 async function navigateToPoint(point: MapPoint): Promise<void> {
   await viewer.centerOn(point.x, point.y, point.zoom);
 }
+
+inject();
 
 const isDebugMode = new URLSearchParams(window.location.search).get("debug") === "true";
 if (isDebugMode) requireElement("debug-controls").classList.add("visible");
