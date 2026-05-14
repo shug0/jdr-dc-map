@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Map Viewer</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --color-bg: #1a1a1a;
+        --color-surface: #2a2a2a;
+        --color-surface-2: #363636;
+        --color-border: #444;
+        --color-text: #e8e8e8;
+        --color-text-muted: #888;
+        --color-accent: #4f8ef7;
+        --color-accent-hover: #3a7de8;
+        --color-danger: #e05252;
+        --color-marker: #f59e0b;
+        --color-marker-border: #fff;
+        --color-debug-badge: #f59e0b;
+        --radius: 8px;
+        --radius-sm: 4px;
+      }
+
+      body {
+        background: var(--color-bg);
+        color: var(--color-text);
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 14px;
+        overflow: hidden;
+        height: 100dvh;
+        width: 100dvw;
+      }
+
+      #app {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #viewport {
+        flex: 1;
+        overflow: hidden;
+        position: relative;
+        cursor: grab;
+        background: var(--color-bg);
+      }
+
+      #viewport.dragging { cursor: grabbing; }
+      #viewport.debug-placing { cursor: crosshair; }
+
+      #canvas-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        transform-origin: 0 0;
+        will-change: transform;
+      }
+
+      #pdf-canvas {
+        display: block;
+        box-shadow: 0 4px 32px rgba(0,0,0,0.6);
+      }
+
+      #overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      #overlay.interactive { pointer-events: all; }
+
+      /* Markers */
+      .marker {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        pointer-events: all;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .marker-dot {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--color-marker);
+        border: 2px solid var(--color-marker-border);
+        box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+        transition: transform 0.15s;
+      }
+
+      .marker:hover .marker-dot { transform: scale(1.3); }
+
+      .marker-label {
+        background: rgba(0,0,0,0.75);
+        color: #fff;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        white-space: nowrap;
+        pointer-events: none;
+        backdrop-filter: blur(4px);
+      }
+
+      /* UI Controls */
+      #controls {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 10;
+      }
+
+      .btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text);
+        border-radius: var(--radius);
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: background 0.15s, border-color 0.15s;
+        white-space: nowrap;
+      }
+
+      .btn:hover { background: var(--color-surface-2); border-color: var(--color-accent); }
+      .btn.active { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
+      .btn-danger { color: var(--color-danger); }
+      .btn-danger:hover { border-color: var(--color-danger); }
+
+      /* Zoom controls */
+      #debug-controls {
+        position: absolute;
+        bottom: 16px;
+        left: 12px;
+        z-index: 10;
+        display: flex;
+        gap: 6px;
+      }
+
+      #zoom-controls {
+        position: absolute;
+        bottom: 16px;
+        right: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        z-index: 10;
+      }
+
+      .zoom-btn {
+        width: 36px;
+        height: 36px;
+        justify-content: center;
+        padding: 0;
+        font-size: 18px;
+        font-weight: 300;
+      }
+
+      #zoom-label {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        padding: 4px 6px;
+        text-align: center;
+        font-size: 11px;
+        color: var(--color-text-muted);
+      }
+
+      /* Debug badge */
+      #debug-badge {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        background: var(--color-debug-badge);
+        color: #000;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+        letter-spacing: 0.05em;
+        z-index: 10;
+        display: none;
+      }
+
+      /* Points dialog */
+      #points-dialog {
+        position: absolute;
+        top: 52px;
+        right: 12px;
+        width: 260px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        z-index: 20;
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        max-height: calc(100dvh - 120px);
+      }
+
+      #points-dialog.open { display: flex; }
+
+      .dialog-header {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--color-border);
+        font-weight: 600;
+        font-size: 13px;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        flex-shrink: 0;
+      }
+
+      #points-list {
+        overflow-y: auto;
+        flex: 1;
+      }
+
+      .point-item {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--color-border);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: background 0.1s;
+      }
+
+      .point-item:last-child { border-bottom: none; }
+      .point-item:hover { background: var(--color-surface-2); }
+
+      .point-item-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-marker);
+        flex-shrink: 0;
+      }
+
+      .point-item-name { flex: 1; }
+
+      .points-empty {
+        padding: 20px 14px;
+        color: var(--color-text-muted);
+        text-align: center;
+        font-size: 13px;
+      }
+
+      /* Debug dialog footer */
+      #dialog-debug-footer {
+        padding: 8px 14px;
+        border-top: 1px solid var(--color-border);
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      #dialog-debug-footer.visible { display: flex; }
+
+      /* Inline popup (placement / edition) */
+      #inline-popup {
+        position: absolute;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+        padding: 12px;
+        z-index: 30;
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        width: 200px;
+      }
+
+      #inline-popup.open { display: flex; }
+
+      #inline-popup input {
+        background: var(--color-bg);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        color: var(--color-text);
+        padding: 6px 8px;
+        font-size: 13px;
+        outline: none;
+        width: 100%;
+      }
+
+      #inline-popup input:focus { border-color: var(--color-accent); }
+
+      .popup-row {
+        display: flex;
+        gap: 6px;
+      }
+
+      .popup-row .btn { flex: 1; justify-content: center; font-size: 12px; padding: 6px 8px; }
+
+      /* Debug info panel */
+      #debug-info-panel {
+        position: absolute;
+        bottom: 56px;
+        left: 12px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+        z-index: 20;
+        display: none;
+        flex-direction: column;
+        min-width: 240px;
+        overflow: hidden;
+      }
+
+      #debug-info-panel.open { display: flex; }
+
+      .info-panel-header {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--color-border);
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      #debug-info-content {
+        padding: 10px 12px;
+        font-family: "SF Mono", "Fira Mono", monospace;
+        font-size: 11px;
+        line-height: 1.8;
+        color: var(--color-text);
+        white-space: pre;
+      }
+
+      .info-val { color: var(--color-accent); }
+
+      .info-panel-footer {
+        padding: 6px 12px;
+        border-top: 1px solid var(--color-border);
+      }
+
+      .info-panel-footer .btn {
+        width: 100%;
+        justify-content: center;
+        font-size: 11px;
+        padding: 5px 8px;
+      }
+
+      #btn-copy-info.copied { color: #4ade80; border-color: #4ade80; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport">
+        <div id="canvas-container">
+          <canvas id="pdf-canvas"></canvas>
+          <div id="overlay"></div>
+        </div>
+
+        <span id="debug-badge">DEBUG</span>
+
+        <div id="controls">
+          <button class="btn" id="btn-toggle-dialog">&#9776; Points</button>
+        </div>
+
+        <div id="debug-controls">
+          <button class="btn" id="btn-toggle-debug">&#9881; Debug</button>
+          <button class="btn" id="btn-toggle-info">&#8505; Infos</button>
+        </div>
+
+        <div id="debug-info-panel">
+          <div class="info-panel-header">
+            <span>État de la vue</span>
+          </div>
+          <div id="debug-info-content">—</div>
+          <div class="info-panel-footer">
+            <button class="btn" id="btn-copy-info">&#128203; Copier</button>
+          </div>
+        </div>
+
+        <div id="zoom-controls">
+          <button class="btn zoom-btn" id="btn-zoom-in">+</button>
+          <div id="zoom-label">100%</div>
+          <button class="btn zoom-btn" id="btn-zoom-out">−</button>
+        </div>
+
+        <div id="points-dialog">
+          <div class="dialog-header">Points d'intérêt</div>
+          <div id="points-list"></div>
+          <div id="dialog-debug-footer">
+            <button class="btn" id="btn-export">&#8595; Exporter JSON</button>
+          </div>
+        </div>
+
+        <div id="inline-popup">
+          <input type="text" id="popup-name-input" placeholder="Nom du point…" />
+          <div class="popup-row">
+            <button class="btn" id="popup-confirm">Confirmer</button>
+            <button class="btn btn-danger" id="popup-delete" style="display:none">Supprimer</button>
+            <button class="btn" id="popup-cancel">Annuler</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
