@@ -1,5 +1,6 @@
 import type { MapPoint } from "./types";
 import type { ViewState } from "./pdf-viewer";
+import { requireElement } from "./dom";
 
 type PopupResult =
   | { action: "confirm"; name: string }
@@ -13,14 +14,13 @@ function showPopup(
   showDelete: boolean
 ): Promise<PopupResult> {
   return new Promise((resolve) => {
-    const popup = document.getElementById("inline-popup") as HTMLElement;
-    const input = document.getElementById("popup-name-input") as HTMLInputElement;
-    const btnConfirm = document.getElementById("popup-confirm") as HTMLButtonElement;
-    const btnDelete = document.getElementById("popup-delete") as HTMLButtonElement;
-    const btnCancel = document.getElementById("popup-cancel") as HTMLButtonElement;
+    const popup = requireElement("inline-popup");
+    const input = requireElement<HTMLInputElement>("popup-name-input");
+    const btnConfirm = requireElement<HTMLButtonElement>("popup-confirm");
+    const btnDelete = requireElement<HTMLButtonElement>("popup-delete");
+    const btnCancel = requireElement<HTMLButtonElement>("popup-cancel");
 
-    // Positionnement
-    const viewport = document.getElementById("viewport") as HTMLElement;
+    const viewport = requireElement("viewport");
     const vw = viewport.clientWidth;
     const vh = viewport.clientHeight;
     const popupW = 200;
@@ -77,8 +77,8 @@ export function initDebugMode(
   points: MapPoint[],
   onPointsChange: () => void
 ): { toggle: () => boolean } {
-  const viewportEl = document.getElementById("viewport") as HTMLElement;
-  const badge = document.getElementById("debug-badge") as HTMLElement;
+  const viewportEl = requireElement("viewport");
+  const badge = requireElement("debug-badge");
   let active = false;
 
   function applyActive(): void {
@@ -102,8 +102,8 @@ export function initDebugMode(
     const clickY = event.clientY - rect.top;
 
     const viewState = getViewState();
-    const normX = clickX / viewState.pdfWidth;
-    const normY = clickY / viewState.pdfHeight;
+    const normX = (clickX - viewState.offsetX) / viewState.pdfWidth;
+    const normY = (clickY - viewState.offsetY) / viewState.pdfHeight;
 
     const vpRect = viewportEl.getBoundingClientRect();
     const result = await showPopup(event.clientX - vpRect.left, event.clientY - vpRect.top, "", false);

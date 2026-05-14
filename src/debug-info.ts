@@ -1,15 +1,16 @@
 import type { ViewState } from "./pdf-viewer";
 import type { MapPoint } from "./types";
+import { requireElement } from "./dom";
 
 export function initDebugInfo(
   overlay: HTMLElement,
   getViewState: () => ViewState,
   getPoints: () => MapPoint[]
 ): void {
-  const btnToggle = document.getElementById("btn-toggle-info") as HTMLButtonElement;
-  const panel = document.getElementById("debug-info-panel") as HTMLElement;
-  const content = document.getElementById("debug-info-content") as HTMLElement;
-  const btnCopy = document.getElementById("btn-copy-info") as HTMLButtonElement;
+  const btnToggle = requireElement<HTMLButtonElement>("btn-toggle-info");
+  const panel = requireElement("debug-info-panel");
+  const content = requireElement("debug-info-content");
+  const btnCopy = requireElement<HTMLButtonElement>("btn-copy-info");
 
   let cursorNormX = 0;
   let cursorNormY = 0;
@@ -34,8 +35,8 @@ export function initDebugInfo(
   overlay.addEventListener("mousemove", (event) => {
     const rect = overlay.getBoundingClientRect();
     const viewState = getViewState();
-    cursorNormX = (event.clientX - rect.left) / viewState.pdfWidth;
-    cursorNormY = (event.clientY - rect.top) / viewState.pdfHeight;
+    cursorNormX = (event.clientX - rect.left - viewState.offsetX) / viewState.pdfWidth;
+    cursorNormY = (event.clientY - rect.top - viewState.offsetY) / viewState.pdfHeight;
     if (isOpen) render();
   });
 

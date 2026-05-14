@@ -18,17 +18,20 @@ export type ViewState = {
   pdfHeight: number;
 };
 
-type PdfViewer = {
+export type PdfViewer = {
   getViewState: () => ViewState;
   setScale: (scale: number) => Promise<void>;
   centerOn: (normX: number, normY: number, scale: number) => Promise<void>;
 };
 
+export type InitialView = { offsetX: number; offsetY: number; scale: number };
+
 export async function initPdfViewer(
   viewport: HTMLElement,
   canvasContainer: HTMLElement,
   canvas: HTMLCanvasElement,
-  onViewChange: (viewState: ViewState) => void
+  onViewChange: (viewState: ViewState) => void,
+  initialView?: InitialView
 ): Promise<PdfViewer> {
   const pdf = await pdfjsLib.getDocument("/assets/carte.pdf").promise;
   const page = await pdf.getPage(1);
@@ -42,6 +45,7 @@ export async function initPdfViewer(
   let renderTask: ReturnType<PDFPageProxy["render"]> | null = null;
   let commitTimer: ReturnType<typeof setTimeout> | null = null;
   let animationId: number | null = null;
+  let renderGeneration = 0;
 
   async function renderPage(scale: number): Promise<void> {
     if (renderTask) {
@@ -86,7 +90,10 @@ export async function initPdfViewer(
   }
 
   async function commitRender(): Promise<void> {
+    renderGeneration += 1;
+    const generation = renderGeneration;
     await renderPage(currentScale);
+    if (generation !== renderGeneration) return;
     renderedScale = currentScale;
     clampOffset();
     applyTransform();
@@ -106,6 +113,8 @@ export async function initPdfViewer(
   async function setScale(newScale: number, focalX?: number, focalY?: number): Promise<void> {
     newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
     if (newScale === currentScale) return;
+
+    if (animationId !== null) { cancelAnimationFrame(animationId); animationId = null; }
 
     if (focalX !== undefined && focalY !== undefined) {
       const ratio = newScale / currentScale;
@@ -161,7 +170,7 @@ export async function initPdfViewer(
   let dragOffsetStartY = 0;
 
   viewport.addEventListener("mousedown", (event) => {
-    if ((event.target as HTMLElement).closest(".marker, #controls, #zoom-controls, #points-dialog, #inline-popup, #debug-badge")) return;
+    if ((event.target as HTMLElement).closest(".marker, #controls, #zoom-controls, #points-dialog, #btn-toggle-dialog, #inline-popup, #debug-badge")) return;
     isDragging = true;
     dragStartX = event.clientX;
     dragStartY = event.clientY;
@@ -214,7 +223,7 @@ export async function initPdfViewer(
   }
 
   viewport.addEventListener("touchstart", (event) => {
-    if ((event.target as HTMLElement).closest(".marker, #controls, #zoom-controls, #points-dialog, #inline-popup, #debug-badge")) return;
+    if ((event.target as HTMLElement).closest(".marker, #controls, #zoom-controls, #points-dialog, #btn-toggle-dialog, #inline-popup, #debug-badge")) return;
     event.preventDefault();
 
     if (animationId !== null) { cancelAnimationFrame(animationId); animationId = null; }
@@ -268,11 +277,21 @@ export async function initPdfViewer(
   viewport.addEventListener("touchcancel", endTouch);
 
   // Rendu initial + centrage
+  if (initialView) {
+    currentScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, initialView.scale));
+  }
   await renderPage(currentScale);
+  renderedScale = currentScale;
   const vw = viewport.clientWidth;
   const vh = viewport.clientHeight;
-  offsetX = (vw - pdfWidth) / 2;
-  offsetY = (vh - pdfHeight) / 2;
+  if (initialView) {
+    offsetX = initialView.offsetX;
+    offsetY = initialView.offsetY;
+    clampOffset();
+  } else {
+    offsetX = (vw - pdfWidth) / 2;
+    offsetY = (vh - pdfHeight) / 2;
+  }
   applyTransform();
   updateZoomLabel();
 

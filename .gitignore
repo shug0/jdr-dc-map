@@ -1,1 +1,5 @@
 node_modules/
+dist/
+.rtk/
+src/**/*.js
+.DS_Store
