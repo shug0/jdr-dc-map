@@ -7,7 +7,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const MIN_SCALE = 0.5;
-const MAX_SCALE = 8;
+const MAX_SCALE = 2;
 const ZOOM_STEP = 0.2;
 
 export type ViewState = {
@@ -41,6 +41,7 @@ export async function initPdfViewer(
   let pdfHeight = 0;
   let renderTask: ReturnType<PDFPageProxy["render"]> | null = null;
   let commitTimer: ReturnType<typeof setTimeout> | null = null;
+  let animationId: number | null = null;
 
   async function renderPage(scale: number): Promise<void> {
     if (renderTask) {
@@ -184,6 +185,88 @@ export async function initPdfViewer(
     }
   });
 
+  // Touch : pan + pinch-to-zoom
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchOffsetStartX = 0;
+  let touchOffsetStartY = 0;
+  let pinchStartDist = 0;
+  let pinchStartScale = 0;
+  let pinchMidX = 0;
+  let pinchMidY = 0;
+  let isTouching = false;
+
+  function touchMidpoint(touches: TouchList): { x: number; y: number } {
+    const rect = viewport.getBoundingClientRect();
+    if (touches.length === 1) {
+      return { x: touches[0].clientX - rect.left, y: touches[0].clientY - rect.top };
+    }
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2 - rect.left,
+      y: (touches[0].clientY + touches[1].clientY) / 2 - rect.top,
+    };
+  }
+
+  function touchDistance(touches: TouchList): number {
+    const dx = touches[1].clientX - touches[0].clientX;
+    const dy = touches[1].clientY - touches[0].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  viewport.addEventListener("touchstart", (event) => {
+    if ((event.target as HTMLElement).closest(".marker, #controls, #zoom-controls, #points-dialog, #inline-popup, #debug-badge")) return;
+    event.preventDefault();
+
+    if (animationId !== null) { cancelAnimationFrame(animationId); animationId = null; }
+
+    isTouching = true;
+    const mid = touchMidpoint(event.touches);
+    touchStartX = mid.x;
+    touchStartY = mid.y;
+    touchOffsetStartX = offsetX;
+    touchOffsetStartY = offsetY;
+
+    if (event.touches.length === 2) {
+      pinchStartDist = touchDistance(event.touches);
+      pinchStartScale = currentScale;
+      pinchMidX = mid.x;
+      pinchMidY = mid.y;
+    }
+  }, { passive: false });
+
+  viewport.addEventListener("touchmove", (event) => {
+    if (!isTouching) return;
+    event.preventDefault();
+
+    const mid = touchMidpoint(event.touches);
+
+    if (event.touches.length === 2) {
+      const dist = touchDistance(event.touches);
+      const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinchStartScale * (dist / pinchStartDist)));
+      const ratio = newScale / currentScale;
+      offsetX = pinchMidX - (pinchMidX - offsetX) * ratio;
+      offsetY = pinchMidY - (pinchMidY - offsetY) * ratio;
+      currentScale = newScale;
+      updateZoomLabel();
+    } else {
+      offsetX = touchOffsetStartX + (mid.x - touchStartX);
+      offsetY = touchOffsetStartY + (mid.y - touchStartY);
+    }
+
+    clampOffset();
+    applyTransform();
+  }, { passive: false });
+
+  const endTouch = (): void => {
+    if (!isTouching) return;
+    isTouching = false;
+    if (commitTimer !== null) clearTimeout(commitTimer);
+    commitTimer = setTimeout(() => { commitTimer = null; void commitRender(); }, 120);
+  };
+
+  viewport.addEventListener("touchend", endTouch);
+  viewport.addEventListener("touchcancel", endTouch);
+
   // Rendu initial + centrage
   await renderPage(currentScale);
   const vw = viewport.clientWidth;
@@ -196,14 +279,56 @@ export async function initPdfViewer(
   return {
     getViewState: () => ({ scale: currentScale, offsetX, offsetY, pdfWidth, pdfHeight }),
     setScale,
-    async centerOn(normX: number, normY: number, targetScale: number): Promise<void> {
-      await setScale(targetScale);
-      const vwInner = viewport.clientWidth;
-      const vhInner = viewport.clientHeight;
-      offsetX = vwInner / 2 - normX * pdfWidth;
-      offsetY = vhInner / 2 - normY * pdfHeight;
-      clampOffset();
-      applyTransform();
+    centerOn(normX: number, normY: number, targetScale: number): Promise<void> {
+      return new Promise((resolve) => {
+        if (animationId !== null) cancelAnimationFrame(animationId);
+        if (commitTimer !== null) { clearTimeout(commitTimer); commitTimer = null; }
+
+        const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, targetScale));
+        const vwInner = viewport.clientWidth;
+        const vhInner = viewport.clientHeight;
+
+        const startScale = currentScale;
+        const startX = offsetX;
+        const startY = offsetY;
+
+        const cssScaleAtTarget = clampedScale / renderedScale;
+        const visW = pdfWidth * cssScaleAtTarget;
+        const visH = pdfHeight * cssScaleAtTarget;
+        let targetX = vwInner / 2 - normX * visW;
+        let targetY = vhInner / 2 - normY * visH;
+        targetX = Math.min(vwInner - 80, Math.max(80 - visW, targetX));
+        targetY = Math.min(vhInner - 80, Math.max(80 - visH, targetY));
+
+        const duration = 500;
+        const startTime = performance.now();
+
+        function easeInOut(progress: number): number {
+          return progress < 0.5
+            ? 2 * progress * progress
+            : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+        }
+
+        function tick(now: number): void {
+          const elapsed = now - startTime;
+          const progress = easeInOut(Math.min(elapsed / duration, 1));
+
+          currentScale = startScale + (clampedScale - startScale) * progress;
+          offsetX = startX + (targetX - startX) * progress;
+          offsetY = startY + (targetY - startY) * progress;
+          updateZoomLabel();
+          applyTransform();
+
+          if (elapsed < duration) {
+            animationId = requestAnimationFrame(tick);
+          } else {
+            animationId = null;
+            void commitRender().then(resolve);
+          }
+        }
+
+        animationId = requestAnimationFrame(tick);
+      });
     },
   };
 }

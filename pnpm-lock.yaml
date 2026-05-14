@@ -12,6 +12,9 @@ importers:
         specifier: ^4.4.168
         version: 4.10.38
     devDependencies:
+      postcss:
+        specifier: ^8.5.14
+        version: 8.5.14
       typescript:
         specifier: ^5.4.0
         version: 5.9.3

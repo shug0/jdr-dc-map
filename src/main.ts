@@ -3,6 +3,7 @@ import { renderMarkers } from "./overlay";
 import { initPointsDialog } from "./points-dialog";
 import { initDebugMode, handleMarkerEdit } from "./debug-mode";
 import { initDebugInfo } from "./debug-info";
+import { hideLoadingScreen } from "./loading-screen";
 import { POINTS } from "./data/points";
 import type { MapPoint } from "./types";
 import type { ViewState } from "./pdf-viewer";
@@ -40,6 +41,7 @@ async function navigateToPoint(point: MapPoint): Promise<void> {
 }
 
 const viewer = await initPdfViewer(viewport, canvasContainer, canvas, refreshUI);
+hideLoadingScreen();
 
 dialog = initPointsDialog((point) => void navigateToPoint(point));
 
